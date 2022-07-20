@@ -197,9 +197,6 @@ class BaseDatabaseSchemaEditor:
             with self.connection.cursor() as cursor:
                 cursor.execute(sql, params)
 
-    def quote_name(self, name):
-        return self.connection.ops.quote_name(name)
-
     def table_sql(self, model):
         """Take a model and return its table definition."""
         # Add any unique_togethers (always deferred, as some fields might be
@@ -394,29 +391,6 @@ class BaseDatabaseSchemaEditor:
         return "%s"
 
     @staticmethod
-    def _effective_default(field):
-        # This method allows testing its logic without a connection.
-        if field.has_default():
-            default = field.get_default()
-        elif not field.null and field.blank and field.empty_strings_allowed:
-            if field.get_internal_type() == "BinaryField":
-                default = b""
-            else:
-                default = ""
-        elif getattr(field, "auto_now", False) or getattr(field, "auto_now_add", False):
-            internal_type = field.get_internal_type()
-            if internal_type == "DateTimeField":
-                default = timezone.now()
-            else:
-                default = datetime.now()
-                if internal_type == "DateField":
-                    default = default.date()
-                elif internal_type == "TimeField":
-                    default = default.time()
-        else:
-            default = None
-        return default
-
     def effective_default(self, field):
         """Return a field's effective database default value."""
         return field.get_db_prep_save(self._effective_default(field), self.connection)
@@ -494,15 +468,7 @@ class BaseDatabaseSchemaEditor:
         self.execute(index.remove_sql(model, self))
 
     def rename_index(self, model, old_index, new_index):
-        if self.connection.features.can_rename_index:
-            self.execute(
-                self._rename_index_sql(model, old_index.name, new_index.name),
-                params=None,
-            )
-        else:
-            self.remove_index(model, old_index)
-            self.add_index(model, new_index)
-
+      
     def add_constraint(self, model, constraint):
         """Add a constraint to a model."""
         sql = constraint.create_sql(model, self)
@@ -932,12 +898,6 @@ class BaseDatabaseSchemaEditor:
         old_type_suffix = old_field.db_type_suffix(connection=self.connection)
         new_type_suffix = new_field.db_type_suffix(connection=self.connection)
         # Collation change?
-        if old_collation != new_collation:
-            # Collation change handles also a type change.
-            fragment = self._alter_column_collation_sql(
-                model, new_field, new_type, new_collation
-            )
-            actions.append(fragment)
         # Type change?
         elif (old_type, old_type_suffix) != (new_type, new_type_suffix):
             fragment, other_actions = self._alter_column_type_sql(
